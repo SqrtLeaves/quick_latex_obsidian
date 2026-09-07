@@ -7,7 +7,12 @@ import {
 	Setting,
 	Modal,
 	Notice,
-	normalizePath
+	normalizePath,
+	TFile,
+	EditorPosition,
+	EditorSuggest,
+	EditorSuggestTriggerInfo,
+	EditorSuggestContext
 } from 'obsidian';
 
 import { Prec, Extension } from '@codemirror/state';
@@ -35,6 +40,8 @@ interface QuickLatexSettings {
 	encloseSelection_toggle: boolean;
 	autoGreekCommandMathMode_toggle: boolean;
 	customShorthand_toggle: boolean;
+	autocompleteShorthand_toggle: boolean;
+	shorthandMRU: string[];
 	useTabtoComplete_toggle: boolean;
 	customShorthand_parameter: string;
 	customTab_parameter: string
@@ -62,6 +69,8 @@ const DEFAULT_SETTINGS: QuickLatexSettings = {
 	encloseSelection_toggle: true,
 	autoGreekCommandMathMode_toggle: true,
 	customShorthand_toggle: true,
+	autocompleteShorthand_toggle: true,
+	shorthandMRU: [],
 	useTabtoComplete_toggle: false,
 	customShorthand_parameter: "bi:::\\binom{#cursor}{#tab};\nsq:::\\sqrt{};\nbb:::\\mathbb{};\nbf:::\\mathbf{};\nte:::\\text{};\ninf:::\\infty;\n"+
 							"cd:::\\cdot;\nqu:::\\quad;\nti:::\\times;\n"+
@@ -838,6 +847,7 @@ export default class QuickLatexPlugin extends Plugin {
 	async onload() {
 
 		this.registerEditorExtension(this.makeExtensionThing());
+		this.registerEditorSuggest(new ShorthandSuggest(this.app, this));
 
 		await this.loadSettings();
 
@@ -2001,7 +2011,7 @@ export default class QuickLatexPlugin extends Plugin {
 
 	};
 
-	private readonly withinText = (
+	readonly withinText = (
 		editor: Editor,
 		at_where: number
 	): Boolean => {
@@ -2011,7 +2021,7 @@ export default class QuickLatexPlugin extends Plugin {
 		return bracket_locations.some(loc => editor.getRange({line:position.line, ch:loc-4},{line:position.line, ch:loc})=="text")
 	}
 
-	private readonly withinMath = (
+	readonly withinMath = (
 		editor: Editor
 	): Boolean => {
 		// check if cursor within $$
@@ -2182,6 +2192,108 @@ class TempShorthandModal extends Modal {
 
 	public onClose(): void {
 		this.contentEl.empty();
+	}
+}
+
+
+interface ShorthandSuggestion {
+	key: string;
+	value: string;
+}
+
+
+class ShorthandSuggest extends EditorSuggest<ShorthandSuggestion> {
+	plugin: QuickLatexPlugin;
+
+	constructor(app: App, plugin: QuickLatexPlugin) {
+		super(app);
+		this.plugin = plugin;
+		this.limit = 50;
+	}
+
+	public onTrigger(cursor: EditorPosition, editor: Editor, file: TFile): EditorSuggestTriggerInfo | null {
+		if (!this.plugin.settings.autocompleteShorthand_toggle) return null;
+
+		const line = editor.getLine(cursor.line);
+		const before = line.slice(0, cursor.ch);
+		const match = before.match(/(^|[^A-Za-z])([A-Za-z]+)$/);
+		if (!match) return null;
+		const query = match[2];
+
+		if (!this.plugin.withinMath(editor)) return null;
+		if (this.plugin.withinText(editor, cursor.ch)) return null;
+
+		return {
+			start: { line: cursor.line, ch: cursor.ch - query.length },
+			end: cursor,
+			query: query
+		};
+	}
+
+	public getSuggestions(context: EditorSuggestContext): ShorthandSuggestion[] {
+		const seen = new Set<string>();
+		const mru = this.plugin.settings.shorthandMRU;
+		const suggestions: ShorthandSuggestion[] = [];
+		for (let i = 0; i < this.plugin.shorthand_array.length; i++) {
+			const pair = this.plugin.shorthand_array[i];
+			if (!pair || pair.length < 2) continue;
+			const key = pair[0];
+			if (seen.has(key) || !key.startsWith(context.query)) continue;
+			seen.add(key);
+			suggestions.push({ key: key, value: pair[1] });
+		}
+		suggestions.sort((a, b) => {
+			const ia = mru.indexOf(a.key);
+			const ib = mru.indexOf(b.key);
+			if (ia != -1 || ib != -1) {
+				return (ia == -1 ? Number.MAX_SAFE_INTEGER : ia) - (ib == -1 ? Number.MAX_SAFE_INTEGER : ib);
+			}
+			return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
+		});
+		return suggestions;
+	}
+
+	public renderSuggestion(value: ShorthandSuggestion, el: HTMLElement): void {
+		el.createEl("span", { text: value.key });
+		const hint = value.value.length > 50 ? value.value.slice(0, 50) + "…" : value.value;
+		el.createEl("span", {
+			text: "→ " + hint.replace(/\n/g, " "),
+			cls: "quick-latex-shorthand-value"
+		});
+	}
+
+	public selectSuggestion(value: ShorthandSuggestion, evt: MouseEvent | KeyboardEvent): void {
+		if (!this.context) return;
+		const editor = this.context.editor;
+		const start = this.context.start;
+
+		let insert = value.value;
+		let cursorOffset: number | null = null;
+		const cursorPos = insert.indexOf("#cursor");
+		if (cursorPos != -1) {
+			insert = insert.slice(0, cursorPos) + insert.slice(cursorPos + 7);
+			cursorOffset = cursorPos;
+		} else if (insert.slice(-2) == "{}") {
+			cursorOffset = insert.length - 1;
+		}
+
+		editor.replaceRange(insert, start, this.context.end);
+
+		if (cursorOffset != null) {
+			editor.setCursor({
+				line: start.line,
+				ch: start.ch + cursorOffset
+			});
+		}
+
+		const mru = this.plugin.settings.shorthandMRU;
+		const existing = mru.indexOf(value.key);
+		if (existing != -1) mru.splice(existing, 1);
+		mru.unshift(value.key);
+		if (mru.length > 100) mru.length = 100;
+		this.plugin.saveData(this.plugin.settings);
+
+		this.close();
 	}
 }
 
@@ -2505,6 +2617,19 @@ class QuickLatexSettingTab extends PluginSettingTab {
 				.onChange(async (value) => {
 					this.plugin.settings.customTab_parameter = value;
 					await this.plugin.saveData(this.plugin.settings);
+				}));
+
+		new Setting(containerEl)
+			.setName('Shorthand Autocomplete (Math mode)')
+			.setDesc('Inside $...$ or $$...$$, typing letters shows an autocomplete popup of ' +
+				'custom and temporary shorthand keys, with the value as hint. ' +
+				'Recently used keys are shown first. Selecting an item inserts its value.')
+			.addToggle((toggle) => toggle
+				.setValue(this.plugin.settings.autocompleteShorthand_toggle)
+				.onChange(async (value) => {
+					this.plugin.settings.autocompleteShorthand_toggle = value;
+					await this.plugin.saveData(this.plugin.settings);
+					this.display();
 				}));
 
 		containerEl.createEl('h3', { text: 'Temporary Shorthands' });
