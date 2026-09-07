@@ -1,5 +1,5 @@
 {
-  "name": "quick-latex-for-obsidian",
+  "name": "ye-quick-latex",
   "version": "1.0.3",
   "description": "A very simple obsidian plugin to simplify latex math fraction and bracket typing.",
   "main": "main.js",

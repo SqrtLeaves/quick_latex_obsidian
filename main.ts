@@ -4,7 +4,10 @@ import {
 	Plugin,
 	Editor,
 	PluginSettingTab,
-	Setting
+	Setting,
+	Modal,
+	Notice,
+	normalizePath
 } from 'obsidian';
 
 import { Prec, Extension } from '@codemirror/state';
@@ -76,6 +79,7 @@ const DEFAULT_SETTINGS: QuickLatexSettings = {
 export default class QuickLatexPlugin extends Plugin {
 	settings: QuickLatexSettings;
 	shorthand_array: string[][];
+	tempShorthand_array: string[][];
 	autoAlign_array: string[];
 
     private vimAllow_autoCloseMath: boolean = true;
@@ -860,6 +864,8 @@ export default class QuickLatexPlugin extends Plugin {
 			this.autoAlign_array = this.settings.autoAlignSymbols.split(" ");
 		}
 
+		await this.loadTempShorthands();
+
 		this.app.workspace.onLayoutReady(() => {
 			this.registerCodeMirror((cm: CodeMirror.Editor) => {
 				cm.on('vim-mode-change', this.handleVimModeChange);
@@ -928,6 +934,18 @@ export default class QuickLatexPlugin extends Plugin {
 					},
 				],
 				editorCallback: (editor) => this.addCasesBlock(editor),
+			});
+
+			this.addCommand({
+				id: 'setTempShorthand',
+				name: 'Set Temporary Shorthand (for selection)',
+				editorCallback: (editor) => this.setTempShorthand(editor),
+			});
+
+			this.addCommand({
+				id: 'openTempShorthandsFile',
+				name: 'Open temporary shorthands file',
+				callback: () => this.openTempShorthandsFile(),
 			});
 		});
 	}
@@ -1457,6 +1475,74 @@ export default class QuickLatexPlugin extends Plugin {
 				};
 			};
 		};
+	};
+
+	private readonly tempShorthandPath = (): string => {
+		return normalizePath(this.manifest.dir + "/temp_shorthands.json");
+	};
+
+	saveTempShorthands = async (): Promise<void> => {
+		await this.app.vault.adapter.write(
+			this.tempShorthandPath(),
+			JSON.stringify(this.tempShorthand_array)
+		);
+	};
+
+	loadTempShorthands = async (): Promise<void> => {
+		this.tempShorthand_array = [];
+		const path = this.tempShorthandPath();
+		if (await this.app.vault.adapter.exists(path)) {
+			try {
+				const data = JSON.parse(await this.app.vault.adapter.read(path));
+				if (Array.isArray(data)) {
+					this.tempShorthand_array = data.filter(
+						(pair): pair is string[] =>
+							Array.isArray(pair) && pair.length == 2 &&
+							typeof pair[0] == "string" && typeof pair[1] == "string"
+					);
+				}
+			} catch (e) {
+				console.error("Quick Latex: failed to load temp_shorthands.json", e);
+			}
+		}
+		for (let i = 0; i < this.tempShorthand_array.length; i++) {
+			this.shorthand_array.push(this.tempShorthand_array[i]);
+		}
+	};
+
+	setTempShorthand = (editor: Editor): void => {
+		const selection = editor.getSelection();
+		if (selection.length == 0) {
+			new Notice("Quick Latex: please select some text first.");
+			return;
+		}
+		new TempShorthandModal(this.app, this, selection).open();
+	};
+
+	openTempShorthandsFile = async (): Promise<void> => {
+		const path = this.tempShorthandPath();
+		if (!await this.app.vault.adapter.exists(path)) {
+			await this.saveTempShorthands();
+		}
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const basePath = (this.app.vault.adapter as any).getBasePath();
+		const fullPath = basePath + "/" + path;
+		const cmd = process.platform === "darwin" ? `open "${fullPath}"`
+			: process.platform === "win32" ? `start "" "${fullPath}"`
+			: `xdg-open "${fullPath}"`;
+		try {
+			// eslint-disable-next-line @typescript-eslint/no-var-requires
+			const { exec } = require("child_process");
+			exec(cmd, (error: Error | null) => {
+				if (error) {
+					console.error("Quick Latex: failed to open temp_shorthands.json", error);
+					new Notice(`Quick Latex: could not open ${fullPath}`);
+				}
+			});
+		} catch (e) {
+			console.error("Quick Latex: failed to open temp_shorthands.json", e);
+			new Notice(`Quick Latex: could not open ${fullPath}`);
+		}
 	};
 
 	private readonly autoEncloseSup = (
@@ -2034,6 +2120,72 @@ export default class QuickLatexPlugin extends Plugin {
 };
 
 
+class TempShorthandModal extends Modal {
+	plugin: QuickLatexPlugin;
+	value: string;
+	errorEl: HTMLElement;
+
+	constructor(app: App, plugin: QuickLatexPlugin, value: string) {
+		super(app);
+		this.plugin = plugin;
+		this.value = value;
+	}
+
+	public onOpen(): void {
+		const { contentEl } = this;
+		contentEl.empty();
+		contentEl.createEl('h2', { text: 'Set temporary shorthand' });
+
+		const preview = this.value.length > 60 ? this.value.slice(0, 60) + "…" : this.value;
+		contentEl.createEl('p', { text: `Value: "${preview}"` });
+
+		let key = "";
+		new Setting(contentEl)
+			.setName('Key')
+			.setDesc('Type the key for this temporary shorthand. ' +
+				'It must not conflict with any existing shorthand key.')
+			.addText((text) => text
+				.setPlaceholder('e.g. ta')
+				.onChange((value) => {
+					key = value;
+				}));
+
+		this.errorEl = contentEl.createDiv();
+		this.errorEl.style.color = "var(--text-error)";
+
+		new Setting(contentEl)
+			.addButton((btn) => btn
+				.setButtonText('Set')
+				.setCta()
+				.onClick(() => this.submit(key)));
+	}
+
+	private submit(key: string): void {
+		key = key.trim();
+		if (key.length == 0) {
+			this.errorEl.setText("Key cannot be empty.");
+			return;
+		}
+		const conflict = this.plugin.shorthand_array.some(
+			(pair) => pair[0] == key
+		);
+		if (conflict) {
+			this.errorEl.setText(`Key "${key}" already exists.`);
+			return;
+		}
+		this.plugin.tempShorthand_array.push([key, this.value]);
+		this.plugin.shorthand_array.push([key, this.value]);
+		this.plugin.saveTempShorthands();
+		new Notice(`Quick Latex: temporary shorthand "${key}" set.`);
+		this.close();
+	}
+
+	public onClose(): void {
+		this.contentEl.empty();
+	}
+}
+
+
 class QuickLatexSettingTab extends PluginSettingTab {
 	plugin: QuickLatexPlugin;
 
@@ -2354,5 +2506,42 @@ class QuickLatexSettingTab extends PluginSettingTab {
 					this.plugin.settings.customTab_parameter = value;
 					await this.plugin.saveData(this.plugin.settings);
 				}));
+
+		containerEl.createEl('h3', { text: 'Temporary Shorthands' });
+		containerEl.createEl('p', {
+			text: 'Select some text in the editor, then run the command "Set Temporary Shorthand (for selection)" ' +
+				'from the command palette to bind it to a temporary key. ' +
+				'Temporary shorthands work in every note, are expanded with space/tab like custom shorthands, ' +
+				'and are persisted across restarts.'
+		});
+
+		new Setting(containerEl)
+			.setName('Open shorthands file')
+			.setDesc('Open temp_shorthands.json with the default system editor to view or edit all temporary shorthands.')
+			.addButton((btn) => btn
+				.setButtonText('Open')
+				.onClick(() => this.plugin.openTempShorthandsFile()));
+
+		if (this.plugin.tempShorthand_array.length == 0) {
+			containerEl.createEl('p', { text: 'No temporary shorthands set.' });
+		} else {
+			this.plugin.tempShorthand_array.forEach((pair, index) => {
+				const display_value = pair[1].length > 60 ? pair[1].slice(0, 60) + "…" : pair[1];
+				new Setting(containerEl)
+					.setName(pair[0])
+					.setDesc(`→ ${display_value}`)
+					.addButton((btn) => btn
+						.setButtonText('Delete')
+						.onClick(async () => {
+							this.plugin.tempShorthand_array.splice(index, 1);
+							const i = this.plugin.shorthand_array.findIndex(
+								(p) => p[0] == pair[0] && p[1] == pair[1]
+							);
+							if (i != -1) this.plugin.shorthand_array.splice(i, 1);
+							await this.plugin.saveTempShorthands();
+							this.display();
+						}));
+			});
+		}
 	};
 }
