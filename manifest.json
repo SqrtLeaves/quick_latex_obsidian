@@ -1,6 +1,6 @@
 {
-	"id": "quick-latex",
-	"name": "Quick Latex",
+	"id": "ye-quick-latex",
+	"name": "Ye Quick Latex",
 	"version": "2.6.5",
 	"minAppVersion": "0.9.12",
 	"description": "Speedup latex math typing with auto fraction, custom shorthand, align block shortcut, matrix shortcut...etc",

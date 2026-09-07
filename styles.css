@@ -11,3 +11,11 @@
 .text-snippets-class {
   height: 70%;
 }
+
+.quick-latex-shorthand-value {
+  color: var(--text-muted);
+  margin-left: 1em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

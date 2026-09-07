@@ -4,7 +4,15 @@ import {
 	Plugin,
 	Editor,
 	PluginSettingTab,
-	Setting
+	Setting,
+	Modal,
+	Notice,
+	normalizePath,
+	TFile,
+	EditorPosition,
+	EditorSuggest,
+	EditorSuggestTriggerInfo,
+	EditorSuggestContext
 } from 'obsidian';
 
 import { Prec, Extension } from '@codemirror/state';
@@ -32,6 +40,8 @@ interface QuickLatexSettings {
 	encloseSelection_toggle: boolean;
 	autoGreekCommandMathMode_toggle: boolean;
 	customShorthand_toggle: boolean;
+	autocompleteShorthand_toggle: boolean;
+	shorthandMRU: string[];
 	useTabtoComplete_toggle: boolean;
 	customShorthand_parameter: string;
 	customTab_parameter: string
@@ -59,6 +69,8 @@ const DEFAULT_SETTINGS: QuickLatexSettings = {
 	encloseSelection_toggle: true,
 	autoGreekCommandMathMode_toggle: true,
 	customShorthand_toggle: true,
+	autocompleteShorthand_toggle: true,
+	shorthandMRU: [],
 	useTabtoComplete_toggle: false,
 	customShorthand_parameter: "bi:::\\binom{#cursor}{#tab};\nsq:::\\sqrt{};\nbb:::\\mathbb{};\nbf:::\\mathbf{};\nte:::\\text{};\ninf:::\\infty;\n"+
 							"cd:::\\cdot;\nqu:::\\quad;\nti:::\\times;\n"+
@@ -76,6 +88,7 @@ const DEFAULT_SETTINGS: QuickLatexSettings = {
 export default class QuickLatexPlugin extends Plugin {
 	settings: QuickLatexSettings;
 	shorthand_array: string[][];
+	tempShorthand_array: string[][];
 	autoAlign_array: string[];
 
     private vimAllow_autoCloseMath: boolean = true;
@@ -834,6 +847,7 @@ export default class QuickLatexPlugin extends Plugin {
 	async onload() {
 
 		this.registerEditorExtension(this.makeExtensionThing());
+		this.registerEditorSuggest(new ShorthandSuggest(this.app, this));
 
 		await this.loadSettings();
 
@@ -859,6 +873,8 @@ export default class QuickLatexPlugin extends Plugin {
 		} else {
 			this.autoAlign_array = this.settings.autoAlignSymbols.split(" ");
 		}
+
+		await this.loadTempShorthands();
 
 		this.app.workspace.onLayoutReady(() => {
 			this.registerCodeMirror((cm: CodeMirror.Editor) => {
@@ -928,6 +944,18 @@ export default class QuickLatexPlugin extends Plugin {
 					},
 				],
 				editorCallback: (editor) => this.addCasesBlock(editor),
+			});
+
+			this.addCommand({
+				id: 'setTempShorthand',
+				name: 'Set Temporary Shorthand (for selection)',
+				editorCallback: (editor) => this.setTempShorthand(editor),
+			});
+
+			this.addCommand({
+				id: 'openTempShorthandsFile',
+				name: 'Open temporary shorthands file',
+				callback: () => this.openTempShorthandsFile(),
 			});
 		});
 	}
@@ -1459,6 +1487,74 @@ export default class QuickLatexPlugin extends Plugin {
 		};
 	};
 
+	private readonly tempShorthandPath = (): string => {
+		return normalizePath(this.manifest.dir + "/temp_shorthands.json");
+	};
+
+	saveTempShorthands = async (): Promise<void> => {
+		await this.app.vault.adapter.write(
+			this.tempShorthandPath(),
+			JSON.stringify(this.tempShorthand_array)
+		);
+	};
+
+	loadTempShorthands = async (): Promise<void> => {
+		this.tempShorthand_array = [];
+		const path = this.tempShorthandPath();
+		if (await this.app.vault.adapter.exists(path)) {
+			try {
+				const data = JSON.parse(await this.app.vault.adapter.read(path));
+				if (Array.isArray(data)) {
+					this.tempShorthand_array = data.filter(
+						(pair): pair is string[] =>
+							Array.isArray(pair) && pair.length == 2 &&
+							typeof pair[0] == "string" && typeof pair[1] == "string"
+					);
+				}
+			} catch (e) {
+				console.error("Quick Latex: failed to load temp_shorthands.json", e);
+			}
+		}
+		for (let i = 0; i < this.tempShorthand_array.length; i++) {
+			this.shorthand_array.push(this.tempShorthand_array[i]);
+		}
+	};
+
+	setTempShorthand = (editor: Editor): void => {
+		const selection = editor.getSelection();
+		if (selection.length == 0) {
+			new Notice("Quick Latex: please select some text first.");
+			return;
+		}
+		new TempShorthandModal(this.app, this, selection).open();
+	};
+
+	openTempShorthandsFile = async (): Promise<void> => {
+		const path = this.tempShorthandPath();
+		if (!await this.app.vault.adapter.exists(path)) {
+			await this.saveTempShorthands();
+		}
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const basePath = (this.app.vault.adapter as any).getBasePath();
+		const fullPath = basePath + "/" + path;
+		const cmd = process.platform === "darwin" ? `open "${fullPath}"`
+			: process.platform === "win32" ? `start "" "${fullPath}"`
+			: `xdg-open "${fullPath}"`;
+		try {
+			// eslint-disable-next-line @typescript-eslint/no-var-requires
+			const { exec } = require("child_process");
+			exec(cmd, (error: Error | null) => {
+				if (error) {
+					console.error("Quick Latex: failed to open temp_shorthands.json", error);
+					new Notice(`Quick Latex: could not open ${fullPath}`);
+				}
+			});
+		} catch (e) {
+			console.error("Quick Latex: failed to open temp_shorthands.json", e);
+			new Notice(`Quick Latex: could not open ${fullPath}`);
+		}
+	};
+
 	private readonly autoEncloseSup = (
 		editor: Editor,
 		event:Event,
@@ -1915,7 +2011,7 @@ export default class QuickLatexPlugin extends Plugin {
 
 	};
 
-	private readonly withinText = (
+	readonly withinText = (
 		editor: Editor,
 		at_where: number
 	): Boolean => {
@@ -1925,7 +2021,7 @@ export default class QuickLatexPlugin extends Plugin {
 		return bracket_locations.some(loc => editor.getRange({line:position.line, ch:loc-4},{line:position.line, ch:loc})=="text")
 	}
 
-	private readonly withinMath = (
+	readonly withinMath = (
 		editor: Editor
 	): Boolean => {
 		// check if cursor within $$
@@ -2032,6 +2128,174 @@ export default class QuickLatexPlugin extends Plugin {
 	}
 
 };
+
+
+class TempShorthandModal extends Modal {
+	plugin: QuickLatexPlugin;
+	value: string;
+	errorEl: HTMLElement;
+
+	constructor(app: App, plugin: QuickLatexPlugin, value: string) {
+		super(app);
+		this.plugin = plugin;
+		this.value = value;
+	}
+
+	public onOpen(): void {
+		const { contentEl } = this;
+		contentEl.empty();
+		contentEl.createEl('h2', { text: 'Set temporary shorthand' });
+
+		const preview = this.value.length > 60 ? this.value.slice(0, 60) + "…" : this.value;
+		contentEl.createEl('p', { text: `Value: "${preview}"` });
+
+		let key = "";
+		new Setting(contentEl)
+			.setName('Key')
+			.setDesc('Type the key for this temporary shorthand. ' +
+				'It must not conflict with any existing shorthand key.')
+			.addText((text) => text
+				.setPlaceholder('e.g. ta')
+				.onChange((value) => {
+					key = value;
+				}));
+
+		this.errorEl = contentEl.createDiv();
+		this.errorEl.style.color = "var(--text-error)";
+
+		new Setting(contentEl)
+			.addButton((btn) => btn
+				.setButtonText('Set')
+				.setCta()
+				.onClick(() => this.submit(key)));
+	}
+
+	private submit(key: string): void {
+		key = key.trim();
+		if (key.length == 0) {
+			this.errorEl.setText("Key cannot be empty.");
+			return;
+		}
+		const conflict = this.plugin.shorthand_array.some(
+			(pair) => pair[0] == key
+		);
+		if (conflict) {
+			this.errorEl.setText(`Key "${key}" already exists.`);
+			return;
+		}
+		this.plugin.tempShorthand_array.push([key, this.value]);
+		this.plugin.shorthand_array.push([key, this.value]);
+		this.plugin.saveTempShorthands();
+		new Notice(`Quick Latex: temporary shorthand "${key}" set.`);
+		this.close();
+	}
+
+	public onClose(): void {
+		this.contentEl.empty();
+	}
+}
+
+
+interface ShorthandSuggestion {
+	key: string;
+	value: string;
+}
+
+
+class ShorthandSuggest extends EditorSuggest<ShorthandSuggestion> {
+	plugin: QuickLatexPlugin;
+
+	constructor(app: App, plugin: QuickLatexPlugin) {
+		super(app);
+		this.plugin = plugin;
+		this.limit = 50;
+	}
+
+	public onTrigger(cursor: EditorPosition, editor: Editor, file: TFile): EditorSuggestTriggerInfo | null {
+		if (!this.plugin.settings.autocompleteShorthand_toggle) return null;
+
+		const line = editor.getLine(cursor.line);
+		const before = line.slice(0, cursor.ch);
+		const match = before.match(/(^|[^A-Za-z])([A-Za-z]+)$/);
+		if (!match) return null;
+		const query = match[2];
+
+		if (!this.plugin.withinMath(editor)) return null;
+		if (this.plugin.withinText(editor, cursor.ch)) return null;
+
+		return {
+			start: { line: cursor.line, ch: cursor.ch - query.length },
+			end: cursor,
+			query: query
+		};
+	}
+
+	public getSuggestions(context: EditorSuggestContext): ShorthandSuggestion[] {
+		const seen = new Set<string>();
+		const mru = this.plugin.settings.shorthandMRU;
+		const suggestions: ShorthandSuggestion[] = [];
+		for (let i = 0; i < this.plugin.shorthand_array.length; i++) {
+			const pair = this.plugin.shorthand_array[i];
+			if (!pair || pair.length < 2) continue;
+			const key = pair[0];
+			if (seen.has(key) || !key.startsWith(context.query)) continue;
+			seen.add(key);
+			suggestions.push({ key: key, value: pair[1] });
+		}
+		suggestions.sort((a, b) => {
+			const ia = mru.indexOf(a.key);
+			const ib = mru.indexOf(b.key);
+			if (ia != -1 || ib != -1) {
+				return (ia == -1 ? Number.MAX_SAFE_INTEGER : ia) - (ib == -1 ? Number.MAX_SAFE_INTEGER : ib);
+			}
+			return a.key < b.key ? -1 : a.key > b.key ? 1 : 0;
+		});
+		return suggestions;
+	}
+
+	public renderSuggestion(value: ShorthandSuggestion, el: HTMLElement): void {
+		el.createEl("span", { text: value.key });
+		const hint = value.value.length > 50 ? value.value.slice(0, 50) + "…" : value.value;
+		el.createEl("span", {
+			text: "→ " + hint.replace(/\n/g, " "),
+			cls: "quick-latex-shorthand-value"
+		});
+	}
+
+	public selectSuggestion(value: ShorthandSuggestion, evt: MouseEvent | KeyboardEvent): void {
+		if (!this.context) return;
+		const editor = this.context.editor;
+		const start = this.context.start;
+
+		let insert = value.value;
+		let cursorOffset: number | null = null;
+		const cursorPos = insert.indexOf("#cursor");
+		if (cursorPos != -1) {
+			insert = insert.slice(0, cursorPos) + insert.slice(cursorPos + 7);
+			cursorOffset = cursorPos;
+		} else if (insert.slice(-2) == "{}") {
+			cursorOffset = insert.length - 1;
+		}
+
+		editor.replaceRange(insert, start, this.context.end);
+
+		if (cursorOffset != null) {
+			editor.setCursor({
+				line: start.line,
+				ch: start.ch + cursorOffset
+			});
+		}
+
+		const mru = this.plugin.settings.shorthandMRU;
+		const existing = mru.indexOf(value.key);
+		if (existing != -1) mru.splice(existing, 1);
+		mru.unshift(value.key);
+		if (mru.length > 100) mru.length = 100;
+		this.plugin.saveData(this.plugin.settings);
+
+		this.close();
+	}
+}
 
 
 class QuickLatexSettingTab extends PluginSettingTab {
@@ -2354,5 +2618,55 @@ class QuickLatexSettingTab extends PluginSettingTab {
 					this.plugin.settings.customTab_parameter = value;
 					await this.plugin.saveData(this.plugin.settings);
 				}));
+
+		new Setting(containerEl)
+			.setName('Shorthand Autocomplete (Math mode)')
+			.setDesc('Inside $...$ or $$...$$, typing letters shows an autocomplete popup of ' +
+				'custom and temporary shorthand keys, with the value as hint. ' +
+				'Recently used keys are shown first. Selecting an item inserts its value.')
+			.addToggle((toggle) => toggle
+				.setValue(this.plugin.settings.autocompleteShorthand_toggle)
+				.onChange(async (value) => {
+					this.plugin.settings.autocompleteShorthand_toggle = value;
+					await this.plugin.saveData(this.plugin.settings);
+					this.display();
+				}));
+
+		containerEl.createEl('h3', { text: 'Temporary Shorthands' });
+		containerEl.createEl('p', {
+			text: 'Select some text in the editor, then run the command "Set Temporary Shorthand (for selection)" ' +
+				'from the command palette to bind it to a temporary key. ' +
+				'Temporary shorthands work in every note, are expanded with space/tab like custom shorthands, ' +
+				'and are persisted across restarts.'
+		});
+
+		new Setting(containerEl)
+			.setName('Open shorthands file')
+			.setDesc('Open temp_shorthands.json with the default system editor to view or edit all temporary shorthands.')
+			.addButton((btn) => btn
+				.setButtonText('Open')
+				.onClick(() => this.plugin.openTempShorthandsFile()));
+
+		if (this.plugin.tempShorthand_array.length == 0) {
+			containerEl.createEl('p', { text: 'No temporary shorthands set.' });
+		} else {
+			this.plugin.tempShorthand_array.forEach((pair, index) => {
+				const display_value = pair[1].length > 60 ? pair[1].slice(0, 60) + "…" : pair[1];
+				new Setting(containerEl)
+					.setName(pair[0])
+					.setDesc(`→ ${display_value}`)
+					.addButton((btn) => btn
+						.setButtonText('Delete')
+						.onClick(async () => {
+							this.plugin.tempShorthand_array.splice(index, 1);
+							const i = this.plugin.shorthand_array.findIndex(
+								(p) => p[0] == pair[0] && p[1] == pair[1]
+							);
+							if (i != -1) this.plugin.shorthand_array.splice(i, 1);
+							await this.plugin.saveTempShorthands();
+							this.display();
+						}));
+			});
+		}
 	};
 }
