@@ -19,3 +19,72 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ===== Settings page ===== */
+
+.quick-latex-settings .quick-latex-title {
+  margin-bottom: 0;
+}
+
+.quick-latex-settings .quick-latex-subtitle {
+  color: var(--text-muted);
+  margin-top: 0.2em;
+  margin-bottom: 1.5em;
+}
+
+.quick-latex-settings .quick-latex-section-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 0.5em;
+  margin-top: 1.8em;
+  margin-bottom: 0.6em;
+  padding-bottom: 0.4em;
+  border-bottom: 2px solid var(--background-modifier-border);
+}
+
+.quick-latex-settings .quick-latex-section-icon {
+  color: var(--interactive-accent);
+  font-weight: 600;
+}
+
+.quick-latex-settings .quick-latex-section-title {
+  font-size: var(--font-ui-medium);
+  font-weight: 600;
+}
+
+.quick-latex-settings .quick-latex-section-desc {
+  flex-basis: 100%;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  margin-top: 0.3em;
+}
+
+.quick-latex-settings .setting-item {
+  padding-top: 0.6em;
+  padding-bottom: 0.6em;
+}
+
+.quick-latex-settings .setting-item-description {
+  color: var(--text-muted);
+}
+
+.quick-latex-settings .quick-latex-syntax-help {
+  margin: 0.3em 0 1em 0;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.quick-latex-settings .quick-latex-syntax-help summary {
+  cursor: pointer;
+  color: var(--text-accent);
+}
+
+.quick-latex-settings .quick-latex-syntax-help ul {
+  margin-top: 0.5em;
+  padding-left: 1.5em;
+}
+
+.quick-latex-settings .quick-latex-syntax-help li {
+  margin-bottom: 0.3em;
+}

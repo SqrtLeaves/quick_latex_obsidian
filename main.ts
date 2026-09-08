@@ -2310,7 +2310,22 @@ class QuickLatexSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		containerEl.createEl('h2', { text: 'Quick Latex for Obsidian - Settings' });
+		containerEl.addClass('quick-latex-settings');
+		containerEl.createEl('h2', { text: 'Quick Latex for Obsidian', cls: 'quick-latex-title' });
+		containerEl.createEl('p', {
+			text: 'Speed up math typing with auto-closing symbols, shortcut blocks and custom shorthands.',
+			cls: 'quick-latex-subtitle'
+		});
+
+		const addSectionHeader = (icon: string, title: string, desc?: string) => {
+			containerEl.createDiv({ cls: 'quick-latex-section-header' }, (div) => {
+				div.createSpan({ text: icon, cls: 'quick-latex-section-icon' });
+				div.createSpan({ text: title, cls: 'quick-latex-section-title' });
+				if (desc) div.createDiv({ text: desc, cls: 'quick-latex-section-desc' });
+			});
+		};
+
+		addSectionHeader('∑', 'Math & Symbols');
 
 		new Setting(containerEl)
 			.setName('Autoclose $$ symbols')
@@ -2356,39 +2371,6 @@ class QuickLatexSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.encloseSelection_toggle)
 				.onChange(async (value) => {
 					this.plugin.settings.encloseSelection_toggle = value;
-					await this.plugin.saveData(this.plugin.settings);
-					this.display();
-				}));
-
-		new Setting(containerEl)
-			.setName('Autoclose {} curly brackets')
-			.setDesc('Typing "{" will automatically close with "}"')
-			.addToggle((toggle) => toggle
-				.setValue(this.plugin.settings.autoCloseCurly_toggle)
-				.onChange(async (value) => {
-					this.plugin.settings.autoCloseCurly_toggle = value;
-					await this.plugin.saveData(this.plugin.settings);
-					this.display();
-				}));
-
-		new Setting(containerEl)
-			.setName('Autoclose [] square brackets')
-			.setDesc('Typing "[" will automatically close with "]"')
-			.addToggle((toggle) => toggle
-				.setValue(this.plugin.settings.autoCloseSquare_toggle)
-				.onChange(async (value) => {
-					this.plugin.settings.autoCloseSquare_toggle = value;
-					await this.plugin.saveData(this.plugin.settings);
-					this.display();
-				}));
-
-		new Setting(containerEl)
-			.setName('Autoclose () round brackets')
-			.setDesc('Typing "(" will automatically close with ")"')
-			.addToggle((toggle) => toggle
-				.setValue(this.plugin.settings.autoCloseRound_toggle)
-				.onChange(async (value) => {
-					this.plugin.settings.autoCloseRound_toggle = value;
 					await this.plugin.saveData(this.plugin.settings);
 					this.display();
 				}));
@@ -2456,6 +2438,55 @@ class QuickLatexSettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(containerEl)
+			.setName('Greek symbols math mode')
+			.setDesc('Automatically surround commands to insert Greek character written outside math mode with math chars. '+
+			'Eg, typing \\alpha followed by space outside math mode will be replaced with "$\\alpha$"')
+			.addToggle((toggle) => toggle
+				.setValue(this.plugin.settings.autoGreekCommandMathMode_toggle)
+				.onChange(async (value) => {
+					this.plugin.settings.autoGreekCommandMathMode_toggle = value;
+					await this.plugin.saveData(this.plugin.settings);
+					this.display();
+				}));
+
+		addSectionHeader('{ }', 'Auto-close Brackets');
+
+		new Setting(containerEl)
+			.setName('Autoclose {} curly brackets')
+			.setDesc('Typing "{" will automatically close with "}"')
+			.addToggle((toggle) => toggle
+				.setValue(this.plugin.settings.autoCloseCurly_toggle)
+				.onChange(async (value) => {
+					this.plugin.settings.autoCloseCurly_toggle = value;
+					await this.plugin.saveData(this.plugin.settings);
+					this.display();
+				}));
+
+		new Setting(containerEl)
+			.setName('Autoclose [] square brackets')
+			.setDesc('Typing "[" will automatically close with "]"')
+			.addToggle((toggle) => toggle
+				.setValue(this.plugin.settings.autoCloseSquare_toggle)
+				.onChange(async (value) => {
+					this.plugin.settings.autoCloseSquare_toggle = value;
+					await this.plugin.saveData(this.plugin.settings);
+					this.display();
+				}));
+
+		new Setting(containerEl)
+			.setName('Autoclose () round brackets')
+			.setDesc('Typing "(" will automatically close with ")"')
+			.addToggle((toggle) => toggle
+				.setValue(this.plugin.settings.autoCloseRound_toggle)
+				.onChange(async (value) => {
+					this.plugin.settings.autoCloseRound_toggle = value;
+					await this.plugin.saveData(this.plugin.settings);
+					this.display();
+				}));
+
+		addSectionHeader('▦', 'Environments');
+
+		new Setting(containerEl)
 			.setName('Shortcut for Align Block')
 			.setDesc('Use shortcut key to quickly insert \\begin{align*} \\end{align*} block. ' +
 				'Default: "Alt+Shift+A" (Mac: "Option+Shift+A")')
@@ -2504,7 +2535,7 @@ class QuickLatexSettingTab extends PluginSettingTab {
 					await this.plugin.saveData(this.plugin.settings);
 					this.display();
 				}));
-			
+
 		new Setting(containerEl)
 			.setName('Use shift-enter for line break in align and cases block')
 			.setDesc('For align and cases block above, pressing enter automatically adds line break symbol "\\" or "&". Switch here to use shift-enter instead.')
@@ -2539,17 +2570,7 @@ class QuickLatexSettingTab extends PluginSettingTab {
 					await this.plugin.saveData(this.plugin.settings);
 				}));
 
-		new Setting(containerEl)
-			.setName('Greek symbols math mode')
-			.setDesc('Automatically surround commands to insert Greek character written outside math mode with math chars. '+
-			'Eg, typing \\alpha followed by space outside math mode will be replaced with "$\\alpha$"')
-			.addToggle((toggle) => toggle
-				.setValue(this.plugin.settings.autoGreekCommandMathMode_toggle)
-				.onChange(async (value) => {
-					this.plugin.settings.autoGreekCommandMathMode_toggle = value;
-					await this.plugin.saveData(this.plugin.settings);
-					this.display();
-				}));
+		addSectionHeader('✎', 'Custom Shorthand');
 
 		new Setting(containerEl)
 			.setName('Custom Shorthand')
@@ -2562,7 +2583,7 @@ class QuickLatexSettingTab extends PluginSettingTab {
 					await this.plugin.saveData(this.plugin.settings);
 					this.display();
 				}));
-		
+
 		new Setting(containerEl)
 			.setName('Use Tab to complete custom shorthand')
 			.setDesc('Use Tab instead of space to complete custom shorthand.')
@@ -2576,16 +2597,7 @@ class QuickLatexSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Custom Shorthand Parameter')
-			.setDesc('Separate the multi-letters shorthand and the snippet with ":::" and '+
-			'end each set of shorthand snippet pair by "---" and a newline. '+
-			'For expressions that end with "{}", the cursor will automatically be placed within the bracket. '+
-			'Alternatively, you can type "#cursor" within the snippet to set the cursor location after replacement. '+
-			'You can also include "#tab" within the snippet for use cases such as multiple {}s (e.g. \\binom{#cursor}{#tab}). '+
-			'Pressing tab key in such cases will jump the cursor to the next "#tab" keyword. '+
-			'Numbers after each "#tab" can be added to define the order in which to jump between the tabs (e.g. \\left#cursor #tab2 \\right#tab1 will first jump to #tab1 then back to #tab2). '+
-			'Shorthands now support multiline snippets too! '+
-			'(try uninstall then reinstalling the plugin to see the new set of shorthands.) '+
-			'【NOTE】For old users, please kindly replace ":" with ":::" in your custom shorthand parameter.')
+			.setDesc('One shorthand and snippet pair per line, separated by ":::". Click "Syntax help" below for the full syntax.')
 			.setClass("text-snippets-class")
 			.addTextArea((text) => text
 				.setValue(this.plugin.settings.customShorthand_parameter)
@@ -2604,9 +2616,21 @@ class QuickLatexSettingTab extends PluginSettingTab {
 					} else {
 						this.plugin.shorthand_array = value.split(";\n").map(item=>item.split(":::"));
 					}
-					
+
 					await this.plugin.saveData(this.plugin.settings);
 				}));
+
+		const syntaxHelp = containerEl.createEl('details', { cls: 'quick-latex-syntax-help' });
+		syntaxHelp.createEl('summary', { text: 'Syntax help' });
+		syntaxHelp.createEl('ul', {}, (ul) => {
+			ul.createEl('li', { text: 'Separate the multi-letters shorthand and the snippet with ":::" and end each set of shorthand snippet pair by "---" and a newline.' });
+			ul.createEl('li', { text: 'For expressions that end with "{}", the cursor will automatically be placed within the bracket.' });
+			ul.createEl('li', { text: 'Alternatively, you can type "#cursor" within the snippet to set the cursor location after replacement.' });
+			ul.createEl('li', { text: 'You can also include "#tab" within the snippet for use cases such as multiple {}s (e.g. \\binom{#cursor}{#tab}). Pressing tab key in such cases will jump the cursor to the next "#tab" keyword.' });
+			ul.createEl('li', { text: 'Numbers after each "#tab" can be added to define the order in which to jump between the tabs (e.g. \\left#cursor #tab2 \\right#tab1 will first jump to #tab1 then back to #tab2).' });
+			ul.createEl('li', { text: 'Shorthands now support multiline snippets too! (try uninstall then reinstalling the plugin to see the new set of shorthands.)' });
+			ul.createEl('li', { text: '【NOTE】For old users, please kindly replace ":" with ":::" in your custom shorthand parameter.' });
+		});
 
 		new Setting(containerEl)
 			.setName('Custom #tab')
@@ -2632,13 +2656,11 @@ class QuickLatexSettingTab extends PluginSettingTab {
 					this.display();
 				}));
 
-		containerEl.createEl('h3', { text: 'Temporary Shorthands' });
-		containerEl.createEl('p', {
-			text: 'Select some text in the editor, then run the command "Set Temporary Shorthand (for selection)" ' +
-				'from the command palette to bind it to a temporary key. ' +
-				'Temporary shorthands work in every note, are expanded with space/tab like custom shorthands, ' +
-				'and are persisted across restarts.'
-		});
+		addSectionHeader('⚡', 'Temporary Shorthands',
+			'Select some text in the editor, then run the command "Set Temporary Shorthand (for selection)" ' +
+			'from the command palette to bind it to a temporary key. ' +
+			'Temporary shorthands work in every note, are expanded with space/tab like custom shorthands, ' +
+			'and are persisted across restarts.');
 
 		new Setting(containerEl)
 			.setName('Open shorthands file')
